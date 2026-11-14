@@ -71,6 +71,25 @@ function versionOf(watched: Watched, watchlist?: WatchlistEntry[]): string {
   return hash.digest('hex').slice(0, 16);
 }
 
+/** On Postgres, AIOStreams fails a whole import that repeats a video. */
+function distinct({ items, watched, watchlist }: Read): Read {
+  const newest = new Map<string, PullItem>();
+  for (const item of items) {
+    const held = newest.get(item.videoId);
+    if (!held || (item.at ?? 0) > (held.at ?? 0))
+      newest.set(item.videoId, item);
+  }
+  return {
+    items: [...newest.values()],
+    watched: watched && {
+      ...watched,
+      movies: watched.movies && [...new Set(watched.movies)],
+      episodes: watched.episodes && [...new Set(watched.episodes)],
+    },
+    watchlist,
+  };
+}
+
 function remember(key: string, snapshot: Snapshot): void {
   snapshots.delete(key);
   snapshots.set(key, snapshot);
@@ -103,7 +122,9 @@ async function read(
     if (held.last && (recent || now < held.lastUntil)) return held.last;
   }
 
-  const { items, watched, watchlist } = await source.read(now + budgetMs);
+  const { items, watched, watchlist } = distinct(
+    await source.read(now + budgetMs)
+  );
   const complete = watched !== undefined;
   const result: PullResult = { answer: { items }, complete };
   if (watched) {

@@ -20,9 +20,14 @@ const WATCHED_PAGE = 5000;
 const PLAYED_MIN_MS = 60_000;
 const PLAYED_SHARE = 0.9;
 
+/** Nuvio's clients store this without a video id, so every show's episode shares it. */
+const PLACEHOLDER_VIDEO_ID = '__nuvio_episode__:';
+
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
-function videoIdOf(row: WatchedRow): string | null {
+function videoIdOf(
+  row: Pick<WatchedRow, 'content_id' | 'season' | 'episode'>
+): string | null {
   if (row.episode === null) return null;
   return row.season === null
     ? `${row.content_id}:${row.episode}`
@@ -42,19 +47,27 @@ function itemsOf(progress: ProgressRow[]): PullItem[] {
   return progress
     .filter((row) => row.position >= MIN_RESUME_MS)
     .sort((a, b) => b.last_watched - a.last_watched)
-    .map((row) => ({
-      type: row.content_type,
-      metaId: row.content_id,
-      videoId: row.video_id,
-      season: row.season,
-      episode: row.episode,
-      positionMs: row.position,
-      durationMs: row.duration > 0 ? row.duration : undefined,
-      played:
-        row.duration >= PLAYED_MIN_MS &&
-        row.position >= row.duration * PLAYED_SHARE,
-      at: seconds(row.last_watched),
-    }));
+    .flatMap((row) => {
+      const videoId = row.video_id.startsWith(PLACEHOLDER_VIDEO_ID)
+        ? videoIdOf(row)
+        : row.video_id;
+      if (!videoId) return [];
+      return [
+        {
+          type: row.content_type,
+          metaId: row.content_id,
+          videoId,
+          season: row.season,
+          episode: row.episode,
+          positionMs: row.position,
+          durationMs: row.duration > 0 ? row.duration : undefined,
+          played:
+            row.duration >= PLAYED_MIN_MS &&
+            row.position >= row.duration * PLAYED_SHARE,
+          at: seconds(row.last_watched),
+        },
+      ];
+    });
 }
 
 /** The latest episode watched in each show; AIOStreams works out what comes next. */
