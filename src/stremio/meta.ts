@@ -15,6 +15,10 @@ export interface Video {
 export interface Meta {
   id: string;
   videos: Video[];
+  /** What a new library item shows; absent when the addon sent none. */
+  type?: string;
+  name?: string;
+  poster?: string;
 }
 
 /** Every source answered and none of them knows the title. */
@@ -179,7 +183,15 @@ function toMeta(raw: unknown): Meta | null {
     seen.add(video.id);
     videos.push(video);
   }
-  return { id: meta.id, videos };
+  return {
+    id: meta.id,
+    videos,
+    type: meta.type,
+    ...(typeof meta.name === 'string' && meta.name ? { name: meta.name } : {}),
+    ...(typeof meta.poster === 'string' && meta.poster
+      ? { poster: meta.poster }
+      : {}),
+  };
 }
 
 const metaCache = new Map<string, { meta: Meta | null; expires: number }>();

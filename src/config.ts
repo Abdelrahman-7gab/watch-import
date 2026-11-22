@@ -8,6 +8,8 @@ const StremioConfigSchema = z.object({
   service: z.literal('stremio'),
   authKey: z.string().min(1),
   library,
+  /** Also write what is watched through AIOStreams back into Stremio. */
+  writeBack: z.boolean().default(true),
 });
 
 /** The session lives on this server; `key` decrypts it and is only ever in the URL. */

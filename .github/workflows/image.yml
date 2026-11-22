@@ -19,6 +19,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm format:check
+      - run: pnpm test
+        env:
+          SECRET_KEY: test-secret-key-that-is-at-least-32-characters
 
   image:
     needs: check
@@ -41,8 +44,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/viren070/watch-import:latest
-            ghcr.io/viren070/watch-import:${{ github.sha }}
+            ghcr.io/abdelrahman-7gab/watch-import:latest
+            ghcr.io/abdelrahman-7gab/watch-import:${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

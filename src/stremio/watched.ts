@@ -1,4 +1,4 @@
-import { inflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 
 /**
  * Stremio's watched bitfield: one bit per video in the order of
@@ -94,5 +94,31 @@ export class WatchedBitField {
 
   watchedIds(): string[] {
     return this.videoIds.filter((_, i) => this.get(i));
+  }
+
+  /** Marks or clears one video; false when the meta does not list it. */
+  setVideo(videoId: string, watched: boolean): boolean {
+    const index = this.indexOf(videoId);
+    if (index === -1) return false;
+    this.set(index, watched);
+    return true;
+  }
+
+  /**
+   * As Stremio writes it: anchored on the last watched video, or on the first
+   * video when none is, with the bits zlib-compressed and base64-encoded.
+   */
+  encode(): string | null {
+    if (!this.videoIds.length) return null;
+    let last = 0;
+    for (let i = this.videoIds.length - 1; i >= 0; i--) {
+      if (this.get(i)) {
+        last = i;
+        break;
+      }
+    }
+    const bytes = this.values.slice(0, Math.ceil(this.videoIds.length / 8));
+    const packed = deflateSync(bytes).toString('base64');
+    return `${this.videoIds[last]}:${last + 1}:${packed}`;
   }
 }

@@ -19,7 +19,8 @@
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "format": "prettier --write \"src/**/*.ts\" \"public/**/*.html\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"public/**/*.html\""
+    "format:check": "prettier --check \"src/**/*.ts\" \"public/**/*.html\"",
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@aiostreams/addon-sdk": "^0.1.0",

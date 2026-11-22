@@ -6,6 +6,12 @@ An AIOStreams addon that brings your watch history, Continue Watching and librar
 AIOStreams keeps reading it, so what you watch there keeps showing up. It only reads:
 nothing is ever written back to Stremio or Nuvio.
 
+**This fork also writes back to Stremio** (on by default, "Write back to Stremio" on the
+setup page): what you watch through AIOStreams' apps and Jellyfin clients (resume points,
+watched films and episodes, favourites) is written into your Stremio library, so Stremio's
+Continue Watching and watched marks stay in step. Finishing an episode lines up the next one
+in Continue Watching, as Stremio does itself.
+
 Built on [`@aiostreams/addon-sdk`](https://github.com/AIOStreams/addon-sdk).
 
 ## What it brings in

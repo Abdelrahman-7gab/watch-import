@@ -66,6 +66,31 @@ export function libraryGet(authKey: string): Promise<LibraryItem[]> {
   });
 }
 
+/** The library items with these ids; missing ones are left out. */
+export function libraryGetIds(
+  authKey: string,
+  ids: string[]
+): Promise<LibraryItem[]> {
+  return call('datastoreGet', {
+    authKey,
+    collection: LIBRARY_COLLECTION,
+    ids,
+    all: false,
+  });
+}
+
+/** Writes whole items; Stremio keeps the one with the newest `_mtime`. */
+export async function libraryPut(
+  authKey: string,
+  items: LibraryItem[]
+): Promise<void> {
+  await call('datastorePut', {
+    authKey,
+    collection: LIBRARY_COLLECTION,
+    changes: items,
+  });
+}
+
 export interface AddonDescriptor {
   transportUrl: string;
   manifest?: {

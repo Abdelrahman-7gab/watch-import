@@ -272,6 +272,17 @@
             >
           </span>
         </label>
+        <label class="choice" id="write-back-choice">
+          <input type="checkbox" name="writeBack" checked />
+          <span>
+            <strong>Write back to Stremio</strong>
+            <span class="hint"
+              >What you watch through AIOStreams (resume points, watched
+              episodes and films, favourites) goes back to your Stremio library,
+              so Stremio's Continue Watching stays in step.</span
+            >
+          </span>
+        </label>
         <button type="button" class="primary" id="generate">
           Create addon URL
         </button>
@@ -358,6 +369,7 @@
       function chooseService(value) {
         service = value;
         signedOut();
+        $('write-back-choice').hidden = value !== 'stremio';
         for (const el of document.querySelectorAll('[data-service-name]')) {
           el.textContent = NAMES[service];
         }
@@ -528,7 +540,13 @@
                   profile: Number($('profile').value || 1),
                   library,
                 }
-              : { service, authKey: session, library };
+              : {
+                  service,
+                  authKey: session,
+                  library,
+                  writeBack: document.querySelector('input[name="writeBack"]')
+                    .checked,
+                };
           const res = await fetch('/configure', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
