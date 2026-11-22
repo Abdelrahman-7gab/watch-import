@@ -346,6 +346,22 @@ async function fetchMeta(
   return pending;
 }
 
+/** From the public meta addons alone (Cinemeta, Kitsu): for accounts without a Stremio addon collection. */
+export async function resolvePublicMeta(
+  type: string,
+  id: string
+): Promise<Meta | null> {
+  for (const source of FALLBACK_SOURCES.filter((s) => supports(s, type, id))) {
+    try {
+      const meta = await fetchMeta('public', source, type, id);
+      if (meta) return meta;
+    } catch {
+      // The next source may know it.
+    }
+  }
+  return null;
+}
+
 /** The first answer in collection order wins, as on Stremio's meta page. */
 export async function resolveMeta(
   authKey: string,

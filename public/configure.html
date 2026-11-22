@@ -275,11 +275,14 @@
         <label class="choice" id="write-back-choice">
           <input type="checkbox" name="writeBack" checked />
           <span>
-            <strong>Write back to Stremio</strong>
+            <strong
+              >Write back to <span data-service-name>Stremio</span></strong
+            >
             <span class="hint"
               >What you watch through AIOStreams (resume points, watched
-              episodes and films, favourites) goes back to your Stremio library,
-              so Stremio's Continue Watching stays in step.</span
+              episodes and films, favourites) goes back to
+              <span data-service-name>Stremio</span>, so its Continue Watching
+              stays in step.</span
             >
           </span>
         </label>
@@ -369,7 +372,6 @@
       function chooseService(value) {
         service = value;
         signedOut();
-        $('write-back-choice').hidden = value !== 'stremio';
         for (const el of document.querySelectorAll('[data-service-name]')) {
           el.textContent = NAMES[service];
         }
@@ -539,6 +541,8 @@
                   refreshToken: session,
                   profile: Number($('profile').value || 1),
                   library,
+                  writeBack: document.querySelector('input[name="writeBack"]')
+                    .checked,
                 }
               : {
                   service,

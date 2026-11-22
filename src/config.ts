@@ -2,14 +2,15 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 const library = z.boolean().default(true);
+/** Also write what is watched through AIOStreams back to Stremio or Nuvio. */
+const writeBack = z.boolean().default(true);
 const profile = z.number().int().min(1).max(6).default(1);
 
 const StremioConfigSchema = z.object({
   service: z.literal('stremio'),
   authKey: z.string().min(1),
   library,
-  /** Also write what is watched through AIOStreams back into Stremio. */
-  writeBack: z.boolean().default(true),
+  writeBack,
 });
 
 /** The session lives on this server; `key` decrypts it and is only ever in the URL. */
@@ -19,6 +20,7 @@ const NuvioConfigSchema = z.object({
   key: z.string().min(1),
   profile,
   library,
+  writeBack,
 });
 
 export const ConfigSchema = z.discriminatedUnion('service', [
@@ -37,6 +39,7 @@ export const ConfigureRequestSchema = z.discriminatedUnion('service', [
     refreshToken: z.string().min(1),
     profile,
     library,
+    writeBack,
   }),
 ]);
 

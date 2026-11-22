@@ -299,20 +299,25 @@ describe('manifest', () => {
     assert.equal(push?.bulk, true);
   });
 
-  it('only reads when write-back is off, or for Nuvio', () => {
+  it('only reads when write-back is off', () => {
     assert.equal(
       manifestFor({ ...stremio, writeBack: false }).watchState?.push,
       undefined
     );
+    const nuvio = {
+      service: 'nuvio' as const,
+      session: 's',
+      key: 'k',
+      profile: 1,
+      library: true,
+    };
     assert.equal(
-      manifestFor({
-        service: 'nuvio',
-        session: 's',
-        key: 'k',
-        profile: 1,
-        library: true,
-      }).watchState?.push,
+      manifestFor({ ...nuvio, writeBack: false }).watchState?.push,
       undefined
+    );
+    assert.equal(
+      manifestFor({ ...nuvio, writeBack: true }).watchState?.push?.bulk,
+      true
     );
   });
 });
