@@ -97,7 +97,8 @@ describe('nuvioCalls', () => {
       {
         content_id: 'tt0903747',
         content_type: 'series',
-        title: '',
+        // No meta here: the id, since Nuvio overwrites a stored title with whatever is sent.
+        title: 'tt0903747',
         season: 3,
         episode: 7,
         watched_at: AT * 1000,
@@ -175,5 +176,96 @@ describe('nuvioCalls', () => {
       []
     );
     assert.deepEqual(nuvioCalls(film('dropped'), PROFILE, NOW), []);
+  });
+});
+
+describe('nuvioCalls: what the reviews found', () => {
+  const absolute = (event: string, extra: Record<string, unknown> = {}) =>
+    episode(event, {
+      metaId: 'kitsu:1376',
+      videoId: 'kitsu:1376:12',
+      season: null,
+      episode: 12,
+      ...extra,
+    });
+
+  it('writes episodes with absolute numbering, keyed as Nuvio keys them', () => {
+    const played = nuvioCalls(absolute('played'), PROFILE, NOW);
+    assert.deepEqual(played[0].args.p_items, [
+      {
+        content_id: 'kitsu:1376',
+        content_type: 'series',
+        title: 'kitsu:1376',
+        season: null,
+        episode: 12,
+        watched_at: AT * 1000,
+      },
+    ]);
+    assert.deepEqual(played[1].args.p_keys, ['kitsu:1376']);
+    const cleared = nuvioCalls(absolute('unplayed'), PROFILE, NOW);
+    assert.deepEqual(cleared[0].args.p_keys, [
+      { content_id: 'kitsu:1376', episode: 12 },
+    ]);
+    const paused = nuvioCalls(
+      absolute('pause', { positionMs: 60_000, durationMs: 1_440_000 }),
+      PROFILE,
+      NOW
+    );
+    const entry = (paused[0].args.p_entries as Record<string, unknown>[])[0];
+    assert.equal(entry.season, null);
+    assert.equal(entry.episode, 12);
+    assert.equal(entry.progress_key, 'kitsu:1376');
+  });
+
+  it('keeps absolute-numbered episodes in a bulk mark', () => {
+    const bulk = {
+      ...base,
+      event: 'played',
+      scope: 'series',
+      metaId: 'kitsu:1376',
+      videos: [
+        { videoId: 'kitsu:1376:1', season: null, episode: 1 },
+        { videoId: 'kitsu:1376:2', season: null, episode: 2 },
+      ],
+      part: 1,
+      parts: 1,
+    } as WatchStateEvent;
+    const [push] = nuvioCalls(bulk, PROFILE, NOW);
+    assert.equal((push.args.p_items as unknown[]).length, 2);
+  });
+
+  it('reuses the last known duration when an event does not carry one', () => {
+    const durations = new Map<string, number>();
+    nuvioCalls(
+      episode('start', { positionMs: 5_000, durationMs: 2_820_000 }),
+      PROFILE,
+      NOW,
+      undefined,
+      durations
+    );
+    const [pause] = nuvioCalls(
+      episode('pause', { positionMs: 600_000 }),
+      PROFILE,
+      NOW,
+      undefined,
+      durations
+    );
+    const entry = (pause.args.p_entries as Record<string, unknown>[])[0];
+    assert.equal(entry.duration, 2_820_000);
+  });
+
+  it('names what it writes, so a re-mark never blanks the title', () => {
+    const meta = { name: 'Breaking Bad', poster: 'p.jpg' };
+    const [push] = nuvioCalls(episode('played'), PROFILE, NOW, meta);
+    assert.equal(
+      (push.args.p_items as Record<string, unknown>[])[0].title,
+      'Breaking Bad'
+    );
+    const [item] = nuvioCalls(film('watchlisted'), PROFILE, NOW);
+    assert.equal(
+      (item.args.p_items as Record<string, unknown>[])[0].name,
+      'tt0816692',
+      'falls back to the id, as the Stremio writer does'
+    );
   });
 });

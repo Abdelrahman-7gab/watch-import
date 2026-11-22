@@ -3,14 +3,16 @@
 An AIOStreams addon that brings your watch history, Continue Watching and library from
 **Stremio** or **Nuvio** into AIOStreams, through the
 [`watch_state` resource](https://docs.aiostreams.viren070.me/reference/addon-protocol/watch-state).
-AIOStreams keeps reading it, so what you watch there keeps showing up. It only reads:
-nothing is ever written back to Stremio or Nuvio.
+AIOStreams keeps reading it, so what you watch there keeps showing up. Upstream it only
+reads; this fork can also write back (below).
 
-**This fork also writes back to Stremio** (on by default, "Write back to Stremio" on the
-setup page): what you watch through AIOStreams' apps and Jellyfin clients (resume points,
-watched films and episodes, favourites) is written into your Stremio library, so Stremio's
-Continue Watching and watched marks stay in step. Finishing an episode lines up the next one
-in Continue Watching, as Stremio does itself.
+**This fork also writes back to Stremio or Nuvio** ("Write back to …" on the setup page,
+ticked by default there): what you watch through AIOStreams' apps and Jellyfin clients
+(resume points, watched films and episodes, and favourites when the library is imported) is
+written into your Stremio library or Nuvio profile, so Continue Watching and watched marks
+stay in step. Finishing an episode lines up the next one in Stremio's Continue Watching, as
+Stremio does itself. Addon URLs made before write-back existed stay read-only until you
+make a new one.
 
 Built on [`@aiostreams/addon-sdk`](https://github.com/AIOStreams/addon-sdk).
 

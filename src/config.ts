@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 const library = z.boolean().default(true);
-/** Also write what is watched through AIOStreams back to Stremio or Nuvio. */
-const writeBack = z.boolean().default(true);
+/**
+ * Also write what is watched through AIOStreams back to Stremio or Nuvio.
+ * Off unless the link says so: links made before write-back existed stay read-only.
+ */
+const writeBack = z.boolean().default(false);
 const profile = z.number().int().min(1).max(6).default(1);
 
 const StremioConfigSchema = z.object({

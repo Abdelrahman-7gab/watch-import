@@ -1,8 +1,9 @@
 import { createLogger, type WatchStateEvent } from '@aiostreams/addon-sdk';
 import type { StremioConfig } from '../config.js';
 import { libraryGetIds, libraryPut } from './api.js';
-import { normaliseItem, type LibraryItem } from './library-item.js';
+import { normaliseItem, timeOf, type LibraryItem } from './library-item.js';
 import { bitfieldOrder, MetaNotFound, resolveMeta, type Meta } from './meta.js';
+import { serially } from '../serially.js';
 import { WatchedBitField } from './watched.js';
 
 const logger = createLogger('stremio-push');
@@ -19,11 +20,20 @@ function stampOf(event: WatchStateEvent, nowMs: number): number {
   return Number.isFinite(at) && at > 0 ? Math.min(at, nowMs) : nowMs;
 }
 
-/** A library item for a title the account has never opened: kept out of the library, as Stremio does. */
-export function newItem(meta: Meta, type: string, nowMs: number): LibraryItem {
+/**
+ * A library item for a title the account has never opened: kept out of the
+ * library, as Stremio does. Filed under `id`, the id the event and the
+ * library lookup use, which an addon's meta may spell differently.
+ */
+export function newItem(
+  meta: Meta,
+  type: string,
+  nowMs: number,
+  id: string = meta.id
+): LibraryItem {
   return {
-    _id: meta.id,
-    name: meta.name ?? meta.id,
+    _id: id,
+    name: meta.name ?? id,
     type,
     poster: meta.poster ?? null,
     posterShape: 'poster',
@@ -51,7 +61,11 @@ export function newItem(meta: Meta, type: string, nowMs: number): LibraryItem {
   };
 }
 
-/** Marks or clears episodes in the item's watched field; false when the meta is unknown. */
+/**
+ * Marks or clears episodes in the item's watched field. False when nothing
+ * changed: the meta is unknown, the marks were already so, or the stored field
+ * cannot be lined up with the meta (rewriting it would wipe the show's history).
+ */
 function markEpisodes(
   item: LibraryItem,
   meta: Meta | null,
@@ -59,7 +73,14 @@ function markEpisodes(
   watched: boolean
 ): boolean {
   if (!meta) return false;
-  const field = WatchedBitField.decode(item.state.watched, bitfieldOrder(meta));
+  const field = WatchedBitField.read(item.state.watched, bitfieldOrder(meta));
+  if (!field) {
+    logger.warn(
+      { id: item._id },
+      'watched marks do not line up with the meta; left as they are'
+    );
+    return false;
+  }
   let changed = false;
   for (const id of videoIds) changed = field.setVideo(id, watched) || changed;
   if (changed) item.state.watched = field.encode();
@@ -87,7 +108,8 @@ export function applyEvent(
 ): LibraryItem | null {
   const item = normaliseItem(structuredClone(current));
   const state = item.state;
-  const when = iso(stampOf(event, nowMs));
+  const stamp = stampOf(event, nowMs);
+  const when = iso(stamp);
   const finished =
     event.event === 'played' ||
     (event.event === 'stop' && event.played === true);
@@ -98,11 +120,13 @@ export function applyEvent(
     case 'stop': {
       if (finished) break;
       if (!(event.positionMs >= MIN_RESUME_MS)) return null;
+      // A late or retried event never replaces a newer resume point.
+      if (timeOf(state.lastWatched) > stamp) return null;
       state.timeOffset = Math.round(event.positionMs);
       if (event.durationMs && event.durationMs > 0)
         state.duration = Math.round(event.durationMs);
       state.lastWatched = when;
-      if (event.scope === 'episode') state.video_id = event.videoId;
+      state.video_id = event.videoId;
       // Not in the library: Continue Watching still lists a temporary item.
       if (item.removed) item.temp = true;
       break;
@@ -134,18 +158,23 @@ export function applyEvent(
       )
         return null;
     } else if (event.scope === 'movie') {
+      // A viewing counts once: a watched mark after the finished play is the same one.
+      const counted = event.event === 'played' && state.flaggedWatched === 1;
       state.flaggedWatched = watched ? 1 : 0;
-      state.timesWatched = watched ? state.timesWatched + 1 : 0;
+      state.timesWatched = watched ? state.timesWatched + (counted ? 0 : 1) : 0;
       if (watched) {
         state.timeOffset = 0;
         state.lastWatched = when;
       }
     } else if ('videoId' in event) {
-      markEpisodes(item, meta, [event.videoId], watched);
-      if (watched) {
+      const marked = markEpisodes(item, meta, [event.videoId], watched);
+      if (event.event !== 'stop') {
+        // A mark, not the end of a play: only the episode being resumed leaves Continue Watching.
+        if (!marked) return null;
+        if (watched && state.video_id === event.videoId) state.timeOffset = 0;
+      } else if (watched) {
         state.lastWatched = when;
-        const next =
-          event.event === 'stop' ? nextEpisode(meta, event.videoId) : null;
+        const next = nextEpisode(meta, event.videoId);
         if (next) {
           // Stremio's own "next episode" entry in Continue Watching.
           state.video_id = next;
@@ -160,7 +189,8 @@ export function applyEvent(
     }
   }
 
-  item._mtime = iso(nowMs);
+  // Stremio keeps the copy with the newest _mtime, so never stamp one older than the stored copy.
+  item._mtime = iso(Math.max(nowMs, timeOf(current._mtime) + 1));
   return item;
 }
 
@@ -188,19 +218,6 @@ async function metaFor(
   return null;
 }
 
-/** One write at a time per title, so a quick pause after a start never loses either. */
-const queues = new Map<string, Promise<unknown>>();
-
-function serially<T>(key: string, task: () => Promise<T>): Promise<T> {
-  const previous = queues.get(key) ?? Promise.resolve();
-  const next = previous.catch(() => undefined).then(task);
-  queues.set(key, next);
-  void next.finally(() => {
-    if (queues.get(key) === next) queues.delete(key);
-  });
-  return next;
-}
-
 /** Writes an AIOStreams event into the account's Stremio library. */
 export function pushToStremio(
   config: StremioConfig,
@@ -211,7 +228,7 @@ export function pushToStremio(
     return Promise.resolve();
   if (event.event === 'rated' || event.event === 'unrated')
     return Promise.resolve();
-  return serially(`${config.authKey}\0${event.metaId}`, async () => {
+  return serially(`stremio\0${config.authKey}\0${event.metaId}`, async () => {
     const [found] = await libraryGetIds(config.authKey, [event.metaId]);
     const removing =
       event.event === 'unplayed' || event.event === 'unwatchlisted';
@@ -226,7 +243,7 @@ export function pushToStremio(
       return;
     }
     const type = event.scope === 'movie' ? 'movie' : (meta?.type ?? 'series');
-    const base = found ?? newItem(meta!, type, nowMs());
+    const base = found ?? newItem(meta!, type, nowMs(), event.metaId);
     const next = applyEvent(base, event, meta, nowMs());
     if (!next) return;
     await libraryPut(config.authKey, [next]);

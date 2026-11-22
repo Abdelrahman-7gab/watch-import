@@ -321,3 +321,147 @@ describe('manifest', () => {
     );
   });
 });
+
+describe('applyEvent: what the reviews found', () => {
+  const resuming = () => {
+    const item = applyEvent(
+      newItem(show, 'series', NOW),
+      playback('pause', 'episode', 'tt0903747:1:2', 'tt0903747', 600_000),
+      show,
+      NOW
+    )!;
+    return item;
+  };
+
+  it('keeps the resume point when an older episode is marked watched', () => {
+    const before = resuming();
+    const after = applyEvent(
+      before,
+      mark('played', 'episode', 'tt0903747:1:1', 'tt0903747'),
+      show,
+      NOW
+    )!;
+    assert.deepEqual(watchedOf(after.state.watched), ['tt0903747:1:1']);
+    assert.equal(after.state.video_id, 'tt0903747:1:2');
+    assert.equal(after.state.timeOffset, 600_000);
+    assert.equal(after.state.lastWatched, before.state.lastWatched);
+  });
+
+  it('clears the resume point when the episode being resumed is marked watched', () => {
+    const after = applyEvent(
+      resuming(),
+      mark('played', 'episode', 'tt0903747:1:2', 'tt0903747'),
+      show,
+      NOW
+    )!;
+    assert.deepEqual(watchedOf(after.state.watched), ['tt0903747:1:2']);
+    assert.equal(after.state.timeOffset, 0);
+  });
+
+  it('writes nothing for an episode mark it cannot place', () => {
+    const played = mark('played', 'episode', 'tt0903747:1:1', 'tt0903747');
+    assert.equal(applyEvent(resuming(), played, null, NOW), null);
+    const marked = applyEvent(resuming(), played, show, NOW)!;
+    assert.equal(applyEvent(marked, played, show, NOW), null, 'already marked');
+  });
+
+  it('never rewrites a watched field it cannot line up with the meta', () => {
+    const item = resuming();
+    item.state.watched = 'tt0903747:9:9:eJxjAAAAAQAB';
+    const single = mark('played', 'episode', 'tt0903747:1:1', 'tt0903747');
+    assert.equal(applyEvent(item, single, show, NOW), null);
+    const season = {
+      ...base,
+      event: 'played',
+      scope: 'season',
+      metaId: 'tt0903747',
+      season: 1,
+      videos: [{ videoId: 'tt0903747:1:1' }],
+      part: 1,
+      parts: 1,
+    } as WatchStateEvent;
+    assert.equal(applyEvent(item, season, show, NOW), null);
+    const finished = applyEvent(
+      item,
+      playback('stop', 'episode', 'tt0903747:1:2', 'tt0903747', 2_800_000, {
+        played: true,
+      }),
+      show,
+      NOW
+    )!;
+    assert.equal(finished.state.watched, item.state.watched);
+  });
+
+  it('does not let an older event overwrite a newer resume point', () => {
+    const item = resuming();
+    item.state.lastWatched = new Date((AT + 600) * 1000).toISOString();
+    assert.equal(
+      applyEvent(
+        item,
+        playback('pause', 'episode', 'tt0903747:1:2', 'tt0903747', 300_000),
+        show,
+        NOW
+      ),
+      null
+    );
+  });
+
+  it('counts a finished film once when a watched mark follows it', () => {
+    const done = applyEvent(
+      newItem(film, 'movie', NOW),
+      playback('stop', 'movie', 'tt0816692', 'tt0816692', 10_000_000, {
+        played: true,
+      }),
+      null,
+      NOW
+    )!;
+    const marked = applyEvent(
+      done,
+      mark('played', 'movie', 'tt0816692', 'tt0816692'),
+      null,
+      NOW
+    )!;
+    assert.equal(marked.state.timesWatched, 1);
+    const again = applyEvent(
+      marked,
+      playback('stop', 'movie', 'tt0816692', 'tt0816692', 10_000_000, {
+        played: true,
+      }),
+      null,
+      NOW
+    )!;
+    assert.equal(again.state.timesWatched, 2, 'a second viewing still counts');
+  });
+
+  it('records the film as the video being resumed', () => {
+    const item = applyEvent(
+      newItem(film, 'movie', NOW),
+      playback('pause', 'movie', 'tt0816692', 'tt0816692', 3_600_000),
+      null,
+      NOW
+    )!;
+    assert.equal(item.state.video_id, 'tt0816692');
+  });
+
+  it("files a new item under the event's id, not the meta's", () => {
+    const item = newItem(
+      { ...show, id: 'kitsu:1376' },
+      'series',
+      NOW,
+      'tt0903747'
+    );
+    assert.equal(item._id, 'tt0903747');
+  });
+
+  it('never stamps a write older than the copy it replaces', () => {
+    const item = resuming();
+    item._mtime = new Date(NOW + 60_000).toISOString();
+    const after = applyEvent(
+      item,
+      playback('pause', 'episode', 'tt0903747:1:2', 'tt0903747', 900_000),
+      show,
+      NOW
+    )!;
+    assert.ok(Date.parse(after._mtime) > Date.parse(item._mtime));
+  });
+});

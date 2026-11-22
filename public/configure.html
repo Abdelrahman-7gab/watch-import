@@ -280,9 +280,9 @@
             >
             <span class="hint"
               >What you watch through AIOStreams (resume points, watched
-              episodes and films, favourites) goes back to
-              <span data-service-name>Stremio</span>, so its Continue Watching
-              stays in step.</span
+              episodes and films, and favourites when the library is imported)
+              goes back to <span data-service-name>Stremio</span>, so its
+              Continue Watching stays in step.</span
             >
           </span>
         </label>
@@ -534,6 +534,9 @@
           const library = document.querySelector(
             'input[name="library"]'
           ).checked;
+          const writeBack = document.querySelector(
+            'input[name="writeBack"]'
+          ).checked;
           const body =
             service === 'nuvio'
               ? {
@@ -541,15 +544,13 @@
                   refreshToken: session,
                   profile: Number($('profile').value || 1),
                   library,
-                  writeBack: document.querySelector('input[name="writeBack"]')
-                    .checked,
+                  writeBack,
                 }
               : {
                   service,
                   authKey: session,
                   library,
-                  writeBack: document.querySelector('input[name="writeBack"]')
-                    .checked,
+                  writeBack,
                 };
           const res = await fetch('/configure', {
             method: 'POST',

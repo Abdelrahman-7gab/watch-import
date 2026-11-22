@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "format": "prettier --write \"src/**/*.ts\" \"public/**/*.html\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"public/**/*.html\"",
     "test": "tsx --test \"src/**/*.test.ts\""

@@ -26,19 +26,34 @@ export class WatchedBitField {
     serialized: string | null | undefined,
     videoIds: string[]
   ): WatchedBitField {
+    return (
+      WatchedBitField.read(serialized, videoIds) ??
+      WatchedBitField.empty(videoIds)
+    );
+  }
+
+  /**
+   * As {@link decode}, but null when a stored field cannot be lined up with
+   * the meta, so a writer can refuse to replace what it could not read.
+   */
+  static read(
+    serialized: string | null | undefined,
+    videoIds: string[]
+  ): WatchedBitField | null {
     const empty = WatchedBitField.empty(videoIds);
-    const parts = serialized?.split(':') ?? [];
-    if (parts.length < 3) return empty;
+    if (!serialized) return empty;
+    const parts = serialized.split(':');
+    if (parts.length < 3) return null;
     const encoded = parts.pop()!;
     const anchorLength = Number(parts.pop());
     const anchor = videoIds.indexOf(parts.join(':'));
-    if (!Number.isInteger(anchorLength) || anchor === -1) return empty;
+    if (!Number.isInteger(anchorLength) || anchor === -1) return null;
 
     let stored: Uint8Array;
     try {
       stored = inflateSync(Buffer.from(encoded, 'base64'));
     } catch {
-      return empty;
+      return null;
     }
     const values = new Uint8Array(
       Math.max(stored.length, Math.ceil(videoIds.length / 8))
@@ -96,10 +111,10 @@ export class WatchedBitField {
     return this.videoIds.filter((_, i) => this.get(i));
   }
 
-  /** Marks or clears one video; false when the meta does not list it. */
+  /** Marks or clears one video; false when the meta does not list it or it already was. */
   setVideo(videoId: string, watched: boolean): boolean {
     const index = this.indexOf(videoId);
-    if (index === -1) return false;
+    if (index === -1 || this.get(index) === watched) return false;
     this.set(index, watched);
     return true;
   }
