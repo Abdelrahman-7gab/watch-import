@@ -2,10 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { WatchStateEvent } from '@aiostreams/addon-sdk';
 import { manifestFor } from '../manifest.js';
-import { applyEvent, newItem } from './push.js';
+import { applyEvent, newItem, pushToStremio } from './push.js';
 import type { Meta } from './meta.js';
 import { WatchedBitField } from './watched.js';
-import { isInContinueWatching } from './library-item.js';
+import { isInContinueWatching, type LibraryItem } from './library-item.js';
 
 const NOW = Date.UTC(2026, 10, 22, 20, 0, 0);
 const AT = Math.floor(Date.UTC(2026, 10, 22, 19, 30, 0) / 1000);
@@ -34,7 +34,7 @@ const playback = (
   videoId: string,
   metaId: string,
   positionMs: number,
-  extra: { durationMs?: number; played?: boolean } = {}
+  extra: { durationMs?: number; played?: boolean; at?: number } = {}
 ) =>
   ({
     ...base,
@@ -75,6 +75,17 @@ describe('WatchedBitField.encode', () => {
     assert.deepEqual(
       WatchedBitField.decode(field.encode(), grown).watchedIds(),
       ['tt0903747:2:1']
+    );
+  });
+
+  it('keeps every mark when the meta lost videos before the anchor', () => {
+    const all = Array.from({ length: 10 }, (_, i) => `v${i}`);
+    const field = WatchedBitField.empty(all);
+    for (const id of ['v7', 'v8', 'v9']) field.setVideo(id, true);
+    const shrunk = all.filter((id) => id !== 'v0' && id !== 'v1');
+    assert.deepEqual(
+      WatchedBitField.read(field.encode(), shrunk)?.watchedIds(),
+      ['v7', 'v8', 'v9']
     );
   });
 });
@@ -422,10 +433,12 @@ describe('applyEvent: what the reviews found', () => {
       NOW
     )!;
     assert.equal(marked.state.timesWatched, 1);
+    // Twenty minutes later: a stop with the same stamp would be a retry of the first.
     const again = applyEvent(
       marked,
       playback('stop', 'movie', 'tt0816692', 'tt0816692', 10_000_000, {
         played: true,
+        at: AT + 1200,
       }),
       null,
       NOW
@@ -463,5 +476,137 @@ describe('applyEvent: what the reviews found', () => {
       NOW
     )!;
     assert.ok(Date.parse(after._mtime) > Date.parse(item._mtime));
+  });
+});
+
+describe('applyEvent: a late or retried finish', () => {
+  it('counts a retried finished film once', () => {
+    const stop = playback(
+      'stop',
+      'movie',
+      'tt0816692',
+      'tt0816692',
+      10_000_000,
+      {
+        played: true,
+      }
+    );
+    const done = applyEvent(newItem(film, 'movie', NOW), stop, null, NOW)!;
+    const retried = applyEvent(done, stop, null, NOW);
+    assert.equal((retried ?? done).state.timesWatched, 1);
+    assert.equal((retried ?? done).state.flaggedWatched, 1);
+  });
+
+  it('marks a late finished episode but keeps the newer resume point', () => {
+    const paused = applyEvent(
+      newItem(show, 'series', NOW),
+      playback('pause', 'episode', 'tt0903747:2:1', 'tt0903747', 1_200_000, {
+        at: AT + 600,
+      }),
+      show,
+      NOW
+    )!;
+    const late = applyEvent(
+      paused,
+      playback('stop', 'episode', 'tt0903747:1:1', 'tt0903747', 2_800_000, {
+        played: true,
+      }),
+      show,
+      NOW
+    )!;
+    assert.deepEqual(watchedOf(late.state.watched), ['tt0903747:1:1']);
+    assert.equal(late.state.video_id, 'tt0903747:2:1');
+    assert.equal(late.state.timeOffset, 1_200_000);
+    assert.equal(late.state.lastWatched, paused.state.lastWatched);
+  });
+
+  it('keeps the newer resume point when a late finished film arrives', () => {
+    const paused = applyEvent(
+      newItem(film, 'movie', NOW),
+      playback('pause', 'movie', 'tt0816692', 'tt0816692', 3_600_000, {
+        at: AT + 600,
+      }),
+      null,
+      NOW
+    )!;
+    const late = applyEvent(
+      paused,
+      playback('stop', 'movie', 'tt0816692', 'tt0816692', 10_000_000, {
+        played: true,
+      }),
+      null,
+      NOW
+    )!;
+    assert.equal(late.state.flaggedWatched, 1, 'still marked watched');
+    assert.equal(late.state.timeOffset, 3_600_000);
+    assert.equal(late.state.lastWatched, paused.state.lastWatched);
+  });
+});
+
+describe('pushToStremio: round trips', () => {
+  const config = {
+    service: 'stremio' as const,
+    authKey: 'auth',
+    library: true,
+    writeBack: true,
+  };
+
+  /** Answers Stremio's API from `library`, recording every request. */
+  async function withStremio(
+    library: LibraryItem[],
+    run: () => Promise<void>
+  ): Promise<string[]> {
+    const seen: string[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      seen.push(url.replace(/^.*\/api\//, ''));
+      if (url.endsWith('/datastoreGet'))
+        return Response.json({ result: library });
+      if (url.endsWith('/datastorePut'))
+        return Response.json({ result: { success: true } });
+      throw new Error(`unexpected request to ${url}`);
+    }) as typeof fetch;
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = real;
+    }
+    return seen;
+  }
+
+  it('asks nothing of Stremio for a playback event it would drop', async () => {
+    for (const event of ['start', 'pause', 'stop'] as const) {
+      const seen = await withStremio([], () =>
+        pushToStremio(
+          config,
+          playback(event, 'movie', 'tt0816692', 'tt0816692', 500),
+          () => NOW
+        )
+      );
+      assert.deepEqual(seen, [], event);
+    }
+  });
+
+  it('still writes a resume point, and a finish at any position', async () => {
+    const stored = newItem(film, 'movie', NOW);
+    const paused = await withStremio([stored], () =>
+      pushToStremio(
+        config,
+        playback('pause', 'movie', 'tt0816692', 'tt0816692', 5_000),
+        () => NOW
+      )
+    );
+    assert.deepEqual(paused, ['datastoreGet', 'datastorePut']);
+    const finished = await withStremio([stored], () =>
+      pushToStremio(
+        config,
+        playback('stop', 'movie', 'tt0816692', 'tt0816692', 0, {
+          played: true,
+        }),
+        () => NOW
+      )
+    );
+    assert.deepEqual(finished, ['datastoreGet', 'datastorePut']);
   });
 });

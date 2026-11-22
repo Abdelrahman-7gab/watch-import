@@ -346,19 +346,29 @@ async function fetchMeta(
   return pending;
 }
 
-/** From the public meta addons alone (Cinemeta, Kitsu): for accounts without a Stremio addon collection. */
+/**
+ * From the public meta addons alone (Cinemeta, Kitsu): for accounts without a
+ * Stremio addon collection. Null only when every source answered that it does
+ * not know the title; throws when one could not be asked and none had it.
+ * `account` keys the per-account queue, so one account cannot hold up another.
+ */
 export async function resolvePublicMeta(
   type: string,
-  id: string
+  id: string,
+  account: string
 ): Promise<Meta | null> {
+  let failure: Error | null = null;
   for (const source of FALLBACK_SOURCES.filter((s) => supports(s, type, id))) {
     try {
-      const meta = await fetchMeta('public', source, type, id);
+      const meta = await fetchMeta(account, source, type, id);
       if (meta) return meta;
-    } catch {
+    } catch (error) {
       // The next source may know it.
+      failure = error instanceof Error ? error : new Error(String(error));
     }
   }
+  if (failure)
+    throw new UpstreamError(`public meta for ${id}: ${failure.message}`);
   return null;
 }
 

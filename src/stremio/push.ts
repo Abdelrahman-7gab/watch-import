@@ -1,6 +1,7 @@
 import { createLogger, type WatchStateEvent } from '@aiostreams/addon-sdk';
 import type { StremioConfig } from '../config.js';
 import { libraryGetIds, libraryPut } from './api.js';
+import { isFinished, stampOf } from '../events.js';
 import { normaliseItem, timeOf, type LibraryItem } from './library-item.js';
 import { bitfieldOrder, MetaNotFound, resolveMeta, type Meta } from './meta.js';
 import { serially } from '../serially.js';
@@ -15,10 +16,13 @@ const MIN_RESUME_MS = 1000;
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
-function stampOf(event: WatchStateEvent, nowMs: number): number {
-  const at = Number(event.at) * 1000;
-  return Number.isFinite(at) && at > 0 ? Math.min(at, nowMs) : nowMs;
-}
+/** A playback event that cannot change anything: not finished, and too early to resume. */
+const tooEarly = (event: WatchStateEvent) =>
+  (event.event === 'start' ||
+    event.event === 'pause' ||
+    event.event === 'stop') &&
+  !isFinished(event) &&
+  !(event.positionMs >= MIN_RESUME_MS);
 
 /**
  * A library item for a title the account has never opened: kept out of the
@@ -110,18 +114,18 @@ export function applyEvent(
   const state = item.state;
   const stamp = stampOf(event, nowMs);
   const when = iso(stamp);
-  const finished =
-    event.event === 'played' ||
-    (event.event === 'stop' && event.played === true);
+  const finished = isFinished(event);
+  // A late or retried event never replaces newer playback: its resume point,
+  // next episode, date and count stay. A late finish still marks what it watched.
+  const stale = timeOf(state.lastWatched) > stamp;
 
   switch (event.event) {
     case 'start':
     case 'pause':
     case 'stop': {
       if (finished) break;
-      if (!(event.positionMs >= MIN_RESUME_MS)) return null;
-      // A late or retried event never replaces a newer resume point.
-      if (timeOf(state.lastWatched) > stamp) return null;
+      if (tooEarly(event)) return null;
+      if (stale) return null;
       state.timeOffset = Math.round(event.positionMs);
       if (event.durationMs && event.durationMs > 0)
         state.duration = Math.round(event.durationMs);
@@ -145,7 +149,11 @@ export function applyEvent(
       return null;
   }
 
-  if (event.event === 'played' || event.event === 'unplayed' || finished) {
+  if (
+    event.event === 'played' ||
+    event.event === 'unplayed' ||
+    (event.event === 'stop' && finished)
+  ) {
     const watched = finished;
     if (event.scope === 'season' || event.scope === 'series') {
       if (
@@ -158,11 +166,20 @@ export function applyEvent(
       )
         return null;
     } else if (event.scope === 'movie') {
-      // A viewing counts once: a watched mark after the finished play is the same one.
-      const counted = event.event === 'played' && state.flaggedWatched === 1;
-      state.flaggedWatched = watched ? 1 : 0;
-      state.timesWatched = watched ? state.timesWatched + (counted ? 0 : 1) : 0;
-      if (watched) {
+      if (!watched) {
+        state.flaggedWatched = 0;
+        state.timesWatched = 0;
+      } else if (stale) {
+        if (state.flaggedWatched === 1) return null;
+        state.flaggedWatched = 1;
+      } else {
+        // A viewing counts once: a watched mark after the finished play, or
+        // the same finish retried, is the same one.
+        const counted =
+          state.flaggedWatched === 1 &&
+          (event.event === 'played' || timeOf(state.lastWatched) >= stamp);
+        state.flaggedWatched = 1;
+        state.timesWatched += counted ? 0 : 1;
         state.timeOffset = 0;
         state.lastWatched = when;
       }
@@ -171,8 +188,11 @@ export function applyEvent(
       if (event.event !== 'stop') {
         // A mark, not the end of a play: only the episode being resumed leaves Continue Watching.
         if (!marked) return null;
-        if (watched && state.video_id === event.videoId) state.timeOffset = 0;
-      } else if (watched) {
+        if (watched && !stale && state.video_id === event.videoId)
+          state.timeOffset = 0;
+      } else if (stale) {
+        if (!marked) return null;
+      } else {
         state.lastWatched = when;
         const next = nextEpisode(meta, event.videoId);
         if (next) {
@@ -228,6 +248,8 @@ export function pushToStremio(
     return Promise.resolve();
   if (event.event === 'rated' || event.event === 'unrated')
     return Promise.resolve();
+  // Before any round trip: a start that never got going costs Stremio nothing.
+  if (tooEarly(event)) return Promise.resolve();
   return serially(`stremio\0${config.authKey}\0${event.metaId}`, async () => {
     const [found] = await libraryGetIds(config.authKey, [event.metaId]);
     const removing =

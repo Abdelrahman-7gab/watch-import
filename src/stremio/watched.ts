@@ -63,12 +63,11 @@ export class WatchedBitField {
 
     const offset = anchorLength - anchor - 1;
     if (offset === 0) return decoded;
+    // Bounded by the stored bits, not the new meta's length: a meta that lost
+    // videos before the anchor would otherwise drop the last marks for good.
     for (let i = 0; i < videoIds.length; i++) {
       const previous = i + offset;
-      empty.set(
-        i,
-        previous >= 0 && previous < videoIds.length && decoded.get(previous)
-      );
+      empty.set(i, previous >= 0 && decoded.get(previous));
     }
     return empty;
   }

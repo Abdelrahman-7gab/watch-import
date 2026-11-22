@@ -66,17 +66,27 @@ export function libraryGet(authKey: string): Promise<LibraryItem[]> {
   });
 }
 
-/** The library items with these ids; missing ones are left out. */
-export function libraryGetIds(
+/** The library items with these ids; missing and malformed ones are left out. */
+export async function libraryGetIds(
   authKey: string,
   ids: string[]
 ): Promise<LibraryItem[]> {
-  return call('datastoreGet', {
+  const items = await call<unknown>('datastoreGet', {
     authKey,
     collection: LIBRARY_COLLECTION,
     ids,
     all: false,
   });
+  if (!Array.isArray(items)) return [];
+  return items.filter(
+    (item): item is LibraryItem =>
+      !!item &&
+      typeof item === 'object' &&
+      typeof item._id === 'string' &&
+      !!item._id &&
+      !!item.state &&
+      typeof item.state === 'object'
+  );
 }
 
 /** Writes whole items; Stremio keeps the one with the newest `_mtime`. */

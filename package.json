@@ -20,7 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "format": "prettier --write \"src/**/*.ts\" \"public/**/*.html\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"public/**/*.html\"",
-    "test": "tsx --test \"src/**/*.test.ts\""
+    "test": "tsx --import ./src/test-setup.ts --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@aiostreams/addon-sdk": "^0.1.0",

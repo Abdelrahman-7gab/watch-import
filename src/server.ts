@@ -8,12 +8,11 @@ import { UpstreamError } from './http.js';
 import { manifestFor } from './manifest.js';
 import { NuvioAuthError, NuvioError, rpc, type Profile } from './nuvio/api.js';
 import { createSession } from './nuvio/sessions.js';
-import { pushToNuvio } from './nuvio/push.js';
 import { nuvioSource } from './nuvio/source.js';
 import { buildPull } from './reads.js';
 import { getUser, StremioAuthError, StremioError } from './stremio/api.js';
-import { pushToStremio } from './stremio/push.js';
 import { stremioSource } from './stremio/source.js';
+import { pushEvent } from './write-back.js';
 
 const CONFIGURE_PAGE = await readFile(
   new URL('../public/configure.html', import.meta.url),
@@ -83,12 +82,8 @@ const addon = defineAddon({
   config: { schema: ConfigSchema, secret: env.SECRET_KEY },
 
   watchState: {
-    push: ({ config, event }) =>
-      answering(async () => {
-        if (!config.writeBack) return;
-        if (config.service === 'stremio') await pushToStremio(config, event);
-        else await pushToNuvio(config, event);
-      }),
+    // Only reached with write-back on: see pushEvent.
+    push: ({ config, event }) => answering(() => pushEvent(config, event)),
     pull: ({ config, since }) =>
       answering(async () => {
         const budget = env.PULL_BUDGET_SECONDS * 1000;
